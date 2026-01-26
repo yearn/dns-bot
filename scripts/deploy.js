@@ -159,6 +159,20 @@ async function setupTelegramSecrets() {
       );
     }
   }
+
+  // TELEGRAM_THREAD_ID (optional — for posting to a specific topic in a group chat)
+  let threadId = process.env.TELEGRAM_THREAD_ID;
+  if (threadId) {
+    console.log("ℹ️ Using TELEGRAM_THREAD_ID from environment");
+    runCommand(
+      `echo '${threadId}' | npx wrangler secret put TELEGRAM_THREAD_ID`,
+      "Failed to set Telegram thread ID from environment"
+    );
+  } else {
+    console.log(
+      "ℹ️ TELEGRAM_THREAD_ID not set (optional — only needed for group chat topics)"
+    );
+  }
 }
 
 // Set up MONITOR_DOMAINS from config.json
