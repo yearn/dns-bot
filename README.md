@@ -41,18 +41,6 @@ The project is designed to stay comfortably within Cloudflare's free tier for it
 
    - Supply the same variables and values as github actions secrets within your repository's settings.[^1]
 
-   - Update `config.json` with your settings:
-
-     ```json
-     {
-       "domains": ["domain1.com", "domain2.com"],
-       "cron": "*/5 * * * *",
-       "kvNamespace": {
-         "id": "your-kv-namespace-id"
-       }
-     }
-     ```
-
    - Get your Cloudflare API token[^2]
 
 4. **Deploy the bot:**
