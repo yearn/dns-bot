@@ -49,7 +49,7 @@ async function sendTelegramMessage(env: Env, message: string): Promise<void> {
 }
 
 async function queryDNS(domain: string): Promise<DNSResponse> {
-  const server = "https://1.1.1.1/dns-query";
+  const server = "https://cloudflare-dns.com/dns-query";
   const url = new URL(server);
   url.searchParams.append("name", domain);
   url.searchParams.append("type", "SOA"); // First query SOA record
