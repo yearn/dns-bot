@@ -7,6 +7,11 @@ kv_namespaces = [
   { binding = "DNS_KV", id = "fd1d19aa9e2c4cabb5197368d245314b" }
 ]
 
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true
+
 # Cron trigger configuration (runs every minute)
 [triggers]
 crons = ["* * * * *"]
