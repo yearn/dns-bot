@@ -3,6 +3,7 @@ interface Env {
   MONITOR_DOMAINS: string; // Comma-separated list of domains
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_CHAT_ID: string;
+  TELEGRAM_THREAD_ID?: string;
 }
 
 interface DNSResponse {
@@ -36,6 +37,9 @@ async function sendTelegramMessage(env: Env, message: string): Promise<void> {
       chat_id: env.TELEGRAM_CHAT_ID,
       text: message,
       parse_mode: "HTML",
+      ...(env.TELEGRAM_THREAD_ID && {
+        message_thread_id: Number(env.TELEGRAM_THREAD_ID),
+      }),
     }),
   });
 
@@ -45,7 +49,7 @@ async function sendTelegramMessage(env: Env, message: string): Promise<void> {
 }
 
 async function queryDNS(domain: string): Promise<DNSResponse> {
-  const server = "https://1.1.1.1/dns-query";
+  const server = "https://cloudflare-dns.com/dns-query";
   const url = new URL(server);
   url.searchParams.append("name", domain);
   url.searchParams.append("type", "SOA"); // First query SOA record

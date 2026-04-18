@@ -41,18 +41,6 @@ The project is designed to stay comfortably within Cloudflare's free tier for it
 
    - Supply the same variables and values as github actions secrets within your repository's settings.[^1]
 
-   - Update `config.json` with your settings:
-
-     ```json
-     {
-       "domains": ["domain1.com", "domain2.com"],
-       "cron": "*/5 * * * *",
-       "kvNamespace": {
-         "id": "your-kv-namespace-id"
-       }
-     }
-     ```
-
    - Get your Cloudflare API token[^2]
 
 4. **Deploy the bot:**
@@ -95,7 +83,7 @@ To view the logs for your deployed worker:
 
 ## Footnotes
 
-[^1]: Required secrets must be set in both your local `.env` file and GitHub Actions repository secrets. Go to your repository's Settings > Secrets and variables > Actions and add: `CLOUDFLARE_API_TOKEN`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID`.
+[^1]: Required secrets must be set in both your local `.env` file and GitHub Actions repository secrets. Go to your repository's Settings > Secrets and variables > Actions and add: `CLOUDFLARE_API_TOKEN`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID`. Optionally add `TELEGRAM_THREAD_ID` to post alerts to a specific topic thread in a Telegram group chat.
 [^2]: To get your Cloudflare API token:
 
     1. Go to the [Cloudflare Dashboard](https://dash.cloudflare.com/)

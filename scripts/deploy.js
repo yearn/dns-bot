@@ -45,6 +45,10 @@ function checkWrangler() {
 
 // Check if logged in to Cloudflare
 function checkCloudflareLogin() {
+  if (process.env.CLOUDFLARE_API_TOKEN) {
+    console.log("✅ Using CLOUDFLARE_API_TOKEN from environment");
+    return;
+  }
   try {
     execSync("npx wrangler whoami", { stdio: "ignore" });
     console.log("✅ Logged in to Cloudflare");
@@ -54,64 +58,51 @@ function checkCloudflareLogin() {
   }
 }
 
-// Update wrangler.toml with config values
-function updateWranglerConfig() {
-  console.log("📝 Updating wrangler.toml with config values...");
-
-  // Read config.json
-  const config = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "../config.json"), "utf8")
-  );
-
-  // Read wrangler.toml
-  const wranglerPath = path.join(__dirname, "../wrangler.toml");
-  let wranglerContent = fs.readFileSync(wranglerPath, "utf8");
-
-  // Update KV namespace ID
-  wranglerContent = wranglerContent.replace(
-    /id = ".*"/,
-    `id = "${config.kvNamespace.id}"`
-  );
-
-  // Update cron schedule
-  wranglerContent = wranglerContent.replace(
-    /crons = \[".*"\]/,
-    `crons = ["${config.cron}"]`
-  );
-
-  // Write updated wrangler.toml
-  fs.writeFileSync(wranglerPath, wranglerContent);
-  console.log("✅ Updated wrangler.toml with config values");
-}
-
-// Check and create KV namespace if needed
+// Check KV namespace is configured in wrangler.toml
 async function setupKVNamespace() {
-  const config = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "../config.json"), "utf8")
-  );
+  const wranglerPath = path.join(__dirname, "../wrangler.toml");
+  const wranglerContent = fs.readFileSync(wranglerPath, "utf8");
+  const match = wranglerContent.match(/id\s*=\s*"([^"]*)"/);
 
-  if (!config.kvNamespace?.id) {
-    console.log("Creating KV namespace...");
-    const output = execSync('npx wrangler kv:namespace create "DNS_KV"', {
+  if (match && match[1]) {
+    console.log("✅ KV namespace already configured in wrangler.toml");
+    return;
+  }
+
+  // Temporarily remove kv_namespaces so wrangler doesn't choke on the empty id
+  const stripped = wranglerContent.replace(
+    /# KV Namespace configuration\nkv_namespaces = \[.*\]\n/s,
+    ""
+  );
+  fs.writeFileSync(wranglerPath, stripped);
+
+  console.log("Creating KV namespace...");
+  let output;
+  try {
+    output = execSync('npx wrangler kv namespace create "DNS_KV"', {
       encoding: "utf8",
     });
-    const match = output.match(/id = "([^"]+)"/);
-
-    if (!match) {
-      console.error("❌ Failed to create KV namespace");
-      process.exit(1);
-    }
-
-    const namespaceId = match[1];
-    config.kvNamespace = { id: namespaceId };
-    fs.writeFileSync(
-      path.join(__dirname, "../config.json"),
-      JSON.stringify(config, null, 2)
-    );
-    console.log("✅ KV namespace created and added to config.json");
-  } else {
-    console.log("✅ KV namespace already configured");
+  } catch (error) {
+    // Restore original content on failure
+    fs.writeFileSync(wranglerPath, wranglerContent);
+    console.error("❌ Failed to create KV namespace");
+    process.exit(1);
   }
+
+  const idMatch = output.match(/id = "([^"]+)"/);
+  if (!idMatch) {
+    fs.writeFileSync(wranglerPath, wranglerContent);
+    console.error("❌ Failed to parse KV namespace ID from output");
+    process.exit(1);
+  }
+
+  // Restore with the real ID
+  const newContent = wranglerContent.replace(
+    /id\s*=\s*"[^"]*"/,
+    `id = "${idMatch[1]}"`
+  );
+  fs.writeFileSync(wranglerPath, newContent);
+  console.log("✅ KV namespace created and added to wrangler.toml");
 }
 
 // Check and set up Telegram secrets
@@ -159,20 +150,45 @@ async function setupTelegramSecrets() {
       );
     }
   }
+
+  // TELEGRAM_THREAD_ID (optional — for posting to a specific topic in a group chat)
+  let threadId = process.env.TELEGRAM_THREAD_ID;
+  if (threadId) {
+    console.log("ℹ️ Using TELEGRAM_THREAD_ID from environment");
+    runCommand(
+      `echo '${threadId}' | npx wrangler secret put TELEGRAM_THREAD_ID`,
+      "Failed to set Telegram thread ID from environment"
+    );
+  } else {
+    console.log(
+      "ℹ️ TELEGRAM_THREAD_ID not set (optional — only needed for group chat topics)"
+    );
+  }
 }
 
-// Set up MONITOR_DOMAINS from config.json
+// Set up MONITOR_DOMAINS from environment
 async function setupMonitorDomains() {
-  const config = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "../config.json"), "utf8")
-  );
-  const domains = config.domains.join(",");
-
-  console.log("ℹ️ Setting MONITOR_DOMAINS from config.json");
-  runCommand(
-    `echo '${domains}' | npx wrangler secret put MONITOR_DOMAINS`,
-    "Failed to set MONITOR_DOMAINS"
-  );
+  let domains = process.env.MONITOR_DOMAINS;
+  if (domains) {
+    console.log("ℹ️ Using MONITOR_DOMAINS from environment");
+    runCommand(
+      `echo '${domains}' | npx wrangler secret put MONITOR_DOMAINS`,
+      "Failed to set MONITOR_DOMAINS"
+    );
+  } else {
+    try {
+      execSync("npx wrangler secret get MONITOR_DOMAINS", { stdio: "ignore" });
+      console.log("✅ MONITOR_DOMAINS is set");
+    } catch (error) {
+      const domainsPrompt = await prompt(
+        "Enter domains to monitor (comma-separated): "
+      );
+      runCommand(
+        `echo '${domainsPrompt}' | npx wrangler secret put MONITOR_DOMAINS`,
+        "Failed to set MONITOR_DOMAINS"
+      );
+    }
+  }
 }
 
 // Main deployment process
@@ -187,7 +203,6 @@ async function deploy() {
   await setupKVNamespace();
   await setupTelegramSecrets();
   await setupMonitorDomains();
-  updateWranglerConfig();
 
   // Deploy
   console.log("\n📦 Deploying...");

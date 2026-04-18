@@ -4,8 +4,13 @@ compatibility_date = "2024-02-20"
 
 # KV Namespace configuration
 kv_namespaces = [
-  { binding = "DNS_KV", id = "860d4c5cb9384e1cab56e7e70504d765" }
+  { binding = "DNS_KV", id = "fd1d19aa9e2c4cabb5197368d245314b" }
 ]
+
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true
 
 # Cron trigger configuration (runs every minute)
 [triggers]
