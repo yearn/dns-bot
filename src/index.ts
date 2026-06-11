@@ -5,6 +5,11 @@ interface Env {
   TELEGRAM_CHAT_ID: string;
   TELEGRAM_THREAD_ID?: string;
   HEARTBEAT_URL?: string; // Uptime Kuma push URL, pinged after each run
+  // Expected IP ranges for domains on dynamic hosting, e.g.
+  // "flexmeow.com=216.150.0.0/16;other.com=76.76.21.0/24,76.76.22.0/24".
+  // IP changes that stay inside a domain's ranges update state silently
+  // instead of alerting.
+  ALLOWED_IP_RANGES?: string;
 }
 
 interface DNSResponse {
@@ -50,6 +55,55 @@ async function sendTelegramMessage(env: Env, message: string): Promise<void> {
       `Failed to send Telegram message: ${response.status} ${response.statusText} - ${body}`
     );
   }
+}
+
+function ipToInt(ip: string): number | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  let value = 0;
+  for (const part of parts) {
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < 0 || n > 255 || part !== String(n)) {
+      return null;
+    }
+    value = value * 256 + n;
+  }
+  return value;
+}
+
+// Malformed CIDRs or non-IPv4 addresses never match, so bad config
+// fails toward alerting rather than suppressing
+function ipInCidr(ip: string, cidr: string): boolean {
+  const [base, prefixStr] = cidr.split("/");
+  const ipInt = ipToInt(ip);
+  const baseInt = ipToInt(base);
+  const prefix = Number(prefixStr);
+  if (
+    ipInt === null ||
+    baseInt === null ||
+    !Number.isInteger(prefix) ||
+    prefix < 0 ||
+    prefix > 32
+  ) {
+    return false;
+  }
+  if (prefix === 0) return true;
+  const mask = (0xffffffff << (32 - prefix)) >>> 0;
+  return ((ipInt & mask) >>> 0) === ((baseInt & mask) >>> 0);
+}
+
+function allowedRangesFor(domain: string, env: Env): string[] {
+  if (!env.ALLOWED_IP_RANGES) return [];
+  for (const entry of env.ALLOWED_IP_RANGES.split(";")) {
+    const [entryDomain, cidrList] = entry.split("=");
+    if (entryDomain?.trim() === domain && cidrList) {
+      return cidrList
+        .split(",")
+        .map((cidr) => cidr.trim())
+        .filter(Boolean);
+    }
+  }
+  return [];
 }
 
 async function queryDNS(domain: string): Promise<DNSResponse> {
@@ -165,6 +219,27 @@ async function checkDomain(domain: string, env: Env): Promise<boolean> {
 
     // If the IPs have changed
     if (JSON.stringify(previousIPsArray) !== JSON.stringify(currentIPs)) {
+      // Hosts like Vercel rotate IPs within known pools; if every current
+      // IP is inside the domain's allowed ranges, update state silently
+      const allowedRanges = allowedRangesFor(domain, env);
+      if (
+        allowedRanges.length > 0 &&
+        currentIPs.length > 0 &&
+        currentIPs.every((ip) =>
+          allowedRanges.some((cidr) => ipInCidr(ip, cidr))
+        )
+      ) {
+        await env.DNS_KV.put(`dns:${domain}:state`, "resolved");
+        await env.DNS_KV.put(`dns:${domain}:ips`, currentIPs.join(","));
+        await env.DNS_KV.put(`dns:${domain}:serial`, serial);
+        console.log(
+          `IP rotation within allowed ranges for ${domain}: ` +
+            `${previousIPs || "none"} -> ${currentIPs.join(", ")} ` +
+            `(allowed: ${allowedRanges.join(", ")})`
+        );
+        return true;
+      }
+
       const message =
         `🚨 <b>DNS Change Detected</b>\n\n` +
         `Domain: <code>${domain}</code>\n` +

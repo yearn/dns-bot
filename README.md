@@ -59,7 +59,7 @@ To view the logs for your deployed worker:
 
 ## Footnotes
 
-[^1]: Go to your repository's Settings > Secrets and variables > Actions. Add the sensitive values as **secrets**: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `TELEGRAM_BOT_TOKEN`. Add the rest as **variables**: `MONITOR_DOMAINS` (comma-separated domains) and `TELEGRAM_CHAT_ID`, plus optionally `TELEGRAM_THREAD_ID` to post alerts to a specific topic thread in a Telegram group chat and `HEARTBEAT_URL` for Uptime Kuma push monitoring.
+[^1]: Go to your repository's Settings > Secrets and variables > Actions. Add the sensitive values as **secrets**: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `TELEGRAM_BOT_TOKEN`. Add the rest as **variables**: `MONITOR_DOMAINS` (comma-separated domains) and `TELEGRAM_CHAT_ID`, plus optionally `TELEGRAM_THREAD_ID` to post alerts to a specific topic thread in a Telegram group chat and `HEARTBEAT_URL` for Uptime Kuma push monitoring. Optionally add `ALLOWED_IP_RANGES` (e.g. `flexmeow.com=216.150.0.0/16;other.com=76.76.21.0/24,76.76.22.0/24`) so IP changes that stay inside a domain's expected CIDR ranges update state silently instead of alerting - useful for hosts like Vercel that rotate IPs within known pools.
 [^2]: To get your Cloudflare API token:
 
     1. Go to the [Cloudflare Dashboard](https://dash.cloudflare.com/)
