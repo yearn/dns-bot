@@ -4,6 +4,7 @@ interface Env {
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_CHAT_ID: string;
   TELEGRAM_THREAD_ID?: string;
+  HEARTBEAT_URL?: string; // Uptime Kuma push URL, pinged after each run
 }
 
 interface DNSResponse {
@@ -44,7 +45,10 @@ async function sendTelegramMessage(env: Env, message: string): Promise<void> {
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to send Telegram message: ${response.statusText}`);
+    const body = await response.text();
+    throw new Error(
+      `Failed to send Telegram message: ${response.status} ${response.statusText} - ${body}`
+    );
   }
 }
 
@@ -104,7 +108,8 @@ async function queryDNS(domain: string): Promise<DNSResponse> {
   };
 }
 
-async function checkDomain(domain: string, env: Env): Promise<void> {
+// Returns true if the check completed and any needed alert was delivered
+async function checkDomain(domain: string, env: Env): Promise<boolean> {
   try {
     const dnsData = await queryDNS(domain);
 
@@ -119,8 +124,6 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
 
       if (previousState !== "no_authority") {
         // State has changed to no authority
-        await env.DNS_KV.put(`dns:${domain}:state`, "no_authority");
-
         const message =
           `⚠️ <b>DNS Authority Unreachable</b>\n\n` +
           `Domain: <code>${domain}</code>\n` +
@@ -131,10 +134,13 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
           `- Comments: <code>${dnsData.Comment?.join(", ")}</code>\n` +
           `- Worker: <code>dns-bot</code>`;
 
+        // Send the alert before committing state to KV so a failed send
+        // retries on the next run instead of being lost
         await sendTelegramMessage(env, message);
+        await env.DNS_KV.put(`dns:${domain}:state`, "no_authority");
         console.log(`DNS authority unreachable for ${domain}`);
       }
-      return;
+      return true;
     }
 
     // Get all A records
@@ -159,10 +165,6 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
 
     // If the IPs have changed
     if (JSON.stringify(previousIPsArray) !== JSON.stringify(currentIPs)) {
-      await env.DNS_KV.put(`dns:${domain}:state`, "resolved");
-      await env.DNS_KV.put(`dns:${domain}:ips`, currentIPs.join(","));
-      await env.DNS_KV.put(`dns:${domain}:serial`, serial);
-
       const message =
         `🚨 <b>DNS Change Detected</b>\n\n` +
         `Domain: <code>${domain}</code>\n` +
@@ -178,7 +180,13 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
         `- Primary NS: <code>${soaData[0] || "unknown"}</code>\n` +
         `- Admin Email: <code>${soaData[1] || "unknown"}</code>`;
 
+      // Send the alert before committing state to KV so a failed send
+      // retries on the next run instead of being lost
       await sendTelegramMessage(env, message);
+      await env.DNS_KV.put(`dns:${domain}:state`, "resolved");
+      await env.DNS_KV.put(`dns:${domain}:ips`, currentIPs.join(","));
+      await env.DNS_KV.put(`dns:${domain}:serial`, serial);
+
       console.log(`DNS change detected for ${domain}:`);
       console.log(`Previous IPs: ${previousIPs || "none"}`);
       console.log(`New IPs: ${currentIPs.join(", ")}`);
@@ -187,8 +195,6 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
     } else if (serial !== previousSerial) {
       // Only notify on SOA changes if IPs haven't changed
       // This catches cases where other record types changed
-      await env.DNS_KV.put(`dns:${domain}:serial`, serial);
-
       const message =
         `📝 <b>DNS Zone Updated</b>\n\n` +
         `Domain: <code>${domain}</code>\n` +
@@ -205,7 +211,11 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
         `- Expire: <code>${soaData[5] || "unknown"}</code>\n` +
         `- Min TTL: <code>${soaData[6] || "unknown"}</code>`;
 
+      // Send the alert before committing state to KV so a failed send
+      // retries on the next run instead of being lost
       await sendTelegramMessage(env, message);
+      await env.DNS_KV.put(`dns:${domain}:serial`, serial);
+
       console.log(`SOA record updated for ${domain}:`);
       console.log(`Previous Serial: ${previousSerial || "unknown"}`);
       console.log(`New Serial: ${serial}`);
@@ -214,7 +224,12 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
         `No change detected for ${domain} (IPs: ${currentIPs.join(", ")})`
       );
     }
+    return true;
   } catch (error: unknown) {
+    // Log first: if the worker dies on an unhandled exception, none of the
+    // invocation's logs are persisted, leaving no trace of the failure
+    console.error(`Error monitoring DNS for ${domain}:`, error);
+
     const errorMessage =
       `❌ <b>Error Monitoring DNS</b>\n\n` +
       `Domain: <code>${domain}</code>\n` +
@@ -226,8 +241,17 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
       `- Worker: <code>dns-bot</code>\n` +
       `- Domain: <code>${domain}</code>`;
 
-    await sendTelegramMessage(env, errorMessage);
-    console.error(`Error monitoring DNS for ${domain}:`, error);
+    try {
+      await sendTelegramMessage(env, errorMessage);
+    } catch (telegramError: unknown) {
+      // Don't rethrow: a failed Telegram send would crash the run and skip
+      // the remaining domains
+      console.error(
+        `Failed to send error alert for ${domain}:`,
+        telegramError
+      );
+    }
+    return false;
   }
 }
 
@@ -255,8 +279,25 @@ export default {
     );
 
     // Check each domain
+    let allOk = true;
     for (const domain of domains) {
-      await checkDomain(domain, env);
+      const ok = await checkDomain(domain, env);
+      allOk = allOk && ok;
+    }
+
+    // Only ping the heartbeat after a fully clean run: a missed beat tells
+    // Uptime Kuma the bot is broken, whether it stopped running or failed
+    // a check or alert
+    if (env.HEARTBEAT_URL && allOk) {
+      try {
+        const response = await fetch(env.HEARTBEAT_URL);
+        if (!response.ok) {
+          throw new Error(`${response.status} ${response.statusText}`);
+        }
+        console.log("Heartbeat sent");
+      } catch (error: unknown) {
+        console.error("Failed to send heartbeat:", error);
+      }
     }
   },
 
