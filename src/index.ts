@@ -96,7 +96,9 @@ function allowedRangesFor(domain: string, env: Env): string[] {
   if (!env.ALLOWED_IP_RANGES) return [];
   for (const entry of env.ALLOWED_IP_RANGES.split(";")) {
     const [entryDomain, cidrList] = entry.split("=");
-    if (entryDomain?.trim() === domain && cidrList) {
+    // DNS names are case-insensitive, so a case mismatch between
+    // ALLOWED_IP_RANGES and MONITOR_DOMAINS must not disable suppression
+    if (entryDomain?.trim().toLowerCase() === domain.toLowerCase() && cidrList) {
       return cidrList
         .split(",")
         .map((cidr) => cidr.trim())
