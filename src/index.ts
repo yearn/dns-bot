@@ -4,6 +4,7 @@ interface Env {
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_CHAT_ID: string;
   TELEGRAM_THREAD_ID?: string;
+  HEARTBEAT_URL?: string; // Uptime Kuma push URL, pinged after each run
 }
 
 interface DNSResponse {
@@ -107,7 +108,8 @@ async function queryDNS(domain: string): Promise<DNSResponse> {
   };
 }
 
-async function checkDomain(domain: string, env: Env): Promise<void> {
+// Returns true if the check completed and any needed alert was delivered
+async function checkDomain(domain: string, env: Env): Promise<boolean> {
   try {
     const dnsData = await queryDNS(domain);
 
@@ -138,7 +140,7 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
         await env.DNS_KV.put(`dns:${domain}:state`, "no_authority");
         console.log(`DNS authority unreachable for ${domain}`);
       }
-      return;
+      return true;
     }
 
     // Get all A records
@@ -222,6 +224,7 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
         `No change detected for ${domain} (IPs: ${currentIPs.join(", ")})`
       );
     }
+    return true;
   } catch (error: unknown) {
     // Log first: if the worker dies on an unhandled exception, none of the
     // invocation's logs are persisted, leaving no trace of the failure
@@ -248,6 +251,7 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
         telegramError
       );
     }
+    return false;
   }
 }
 
@@ -275,8 +279,25 @@ export default {
     );
 
     // Check each domain
+    let allOk = true;
     for (const domain of domains) {
-      await checkDomain(domain, env);
+      const ok = await checkDomain(domain, env);
+      allOk = allOk && ok;
+    }
+
+    // Only ping the heartbeat after a fully clean run: a missed beat tells
+    // Uptime Kuma the bot is broken, whether it stopped running or failed
+    // a check or alert
+    if (env.HEARTBEAT_URL && allOk) {
+      try {
+        const response = await fetch(env.HEARTBEAT_URL);
+        if (!response.ok) {
+          throw new Error(`${response.status} ${response.statusText}`);
+        }
+        console.log("Heartbeat sent");
+      } catch (error: unknown) {
+        console.error("Failed to send heartbeat:", error);
+      }
     }
   },
 

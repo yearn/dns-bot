@@ -166,6 +166,22 @@ async function setupTelegramSecrets() {
   }
 }
 
+// Set up HEARTBEAT_URL from environment (optional — Uptime Kuma push monitor)
+async function setupHeartbeatUrl() {
+  const heartbeatUrl = process.env.HEARTBEAT_URL;
+  if (heartbeatUrl) {
+    console.log("ℹ️ Using HEARTBEAT_URL from environment");
+    runCommand(
+      `echo '${heartbeatUrl}' | npx wrangler secret put HEARTBEAT_URL`,
+      "Failed to set HEARTBEAT_URL from environment"
+    );
+  } else {
+    console.log(
+      "ℹ️ HEARTBEAT_URL not set (optional — only needed for Uptime Kuma push monitoring)"
+    );
+  }
+}
+
 // Set up MONITOR_DOMAINS from environment
 async function setupMonitorDomains() {
   let domains = process.env.MONITOR_DOMAINS;
@@ -202,6 +218,7 @@ async function deploy() {
   // Set up configuration
   await setupKVNamespace();
   await setupTelegramSecrets();
+  await setupHeartbeatUrl();
   await setupMonitorDomains();
 
   // Deploy
