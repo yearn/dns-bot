@@ -55,4 +55,5 @@ jobs:
           TELEGRAM_THREAD_ID: ${{ vars.TELEGRAM_THREAD_ID }}
           MONITOR_DOMAINS: ${{ vars.MONITOR_DOMAINS }}
           HEARTBEAT_URL: ${{ vars.HEARTBEAT_URL }}
+          ALLOWED_IP_RANGES: ${{ vars.ALLOWED_IP_RANGES }}
         run: npm run deploy

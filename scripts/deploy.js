@@ -18,12 +18,14 @@ const REQUIRED_ENV = [
   "MONITOR_DOMAINS",
 ];
 
-// Plain-text vars; TELEGRAM_THREAD_ID and HEARTBEAT_URL are optional
+// Plain-text vars; TELEGRAM_THREAD_ID, HEARTBEAT_URL, and
+// ALLOWED_IP_RANGES are optional
 const TEXT_VARS = [
   "MONITOR_DOMAINS",
   "TELEGRAM_CHAT_ID",
   "TELEGRAM_THREAD_ID",
   "HEARTBEAT_URL",
+  "ALLOWED_IP_RANGES",
 ];
 
 function fail(message) {
