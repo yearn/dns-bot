@@ -44,7 +44,10 @@ async function sendTelegramMessage(env: Env, message: string): Promise<void> {
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to send Telegram message: ${response.statusText}`);
+    const body = await response.text();
+    throw new Error(
+      `Failed to send Telegram message: ${response.status} ${response.statusText} - ${body}`
+    );
   }
 }
 
@@ -119,8 +122,6 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
 
       if (previousState !== "no_authority") {
         // State has changed to no authority
-        await env.DNS_KV.put(`dns:${domain}:state`, "no_authority");
-
         const message =
           `⚠️ <b>DNS Authority Unreachable</b>\n\n` +
           `Domain: <code>${domain}</code>\n` +
@@ -131,7 +132,10 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
           `- Comments: <code>${dnsData.Comment?.join(", ")}</code>\n` +
           `- Worker: <code>dns-bot</code>`;
 
+        // Send the alert before committing state to KV so a failed send
+        // retries on the next run instead of being lost
         await sendTelegramMessage(env, message);
+        await env.DNS_KV.put(`dns:${domain}:state`, "no_authority");
         console.log(`DNS authority unreachable for ${domain}`);
       }
       return;
@@ -159,10 +163,6 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
 
     // If the IPs have changed
     if (JSON.stringify(previousIPsArray) !== JSON.stringify(currentIPs)) {
-      await env.DNS_KV.put(`dns:${domain}:state`, "resolved");
-      await env.DNS_KV.put(`dns:${domain}:ips`, currentIPs.join(","));
-      await env.DNS_KV.put(`dns:${domain}:serial`, serial);
-
       const message =
         `🚨 <b>DNS Change Detected</b>\n\n` +
         `Domain: <code>${domain}</code>\n` +
@@ -178,7 +178,13 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
         `- Primary NS: <code>${soaData[0] || "unknown"}</code>\n` +
         `- Admin Email: <code>${soaData[1] || "unknown"}</code>`;
 
+      // Send the alert before committing state to KV so a failed send
+      // retries on the next run instead of being lost
       await sendTelegramMessage(env, message);
+      await env.DNS_KV.put(`dns:${domain}:state`, "resolved");
+      await env.DNS_KV.put(`dns:${domain}:ips`, currentIPs.join(","));
+      await env.DNS_KV.put(`dns:${domain}:serial`, serial);
+
       console.log(`DNS change detected for ${domain}:`);
       console.log(`Previous IPs: ${previousIPs || "none"}`);
       console.log(`New IPs: ${currentIPs.join(", ")}`);
@@ -187,8 +193,6 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
     } else if (serial !== previousSerial) {
       // Only notify on SOA changes if IPs haven't changed
       // This catches cases where other record types changed
-      await env.DNS_KV.put(`dns:${domain}:serial`, serial);
-
       const message =
         `📝 <b>DNS Zone Updated</b>\n\n` +
         `Domain: <code>${domain}</code>\n` +
@@ -205,7 +209,11 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
         `- Expire: <code>${soaData[5] || "unknown"}</code>\n` +
         `- Min TTL: <code>${soaData[6] || "unknown"}</code>`;
 
+      // Send the alert before committing state to KV so a failed send
+      // retries on the next run instead of being lost
       await sendTelegramMessage(env, message);
+      await env.DNS_KV.put(`dns:${domain}:serial`, serial);
+
       console.log(`SOA record updated for ${domain}:`);
       console.log(`Previous Serial: ${previousSerial || "unknown"}`);
       console.log(`New Serial: ${serial}`);
@@ -215,6 +223,10 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
       );
     }
   } catch (error: unknown) {
+    // Log first: if the worker dies on an unhandled exception, none of the
+    // invocation's logs are persisted, leaving no trace of the failure
+    console.error(`Error monitoring DNS for ${domain}:`, error);
+
     const errorMessage =
       `❌ <b>Error Monitoring DNS</b>\n\n` +
       `Domain: <code>${domain}</code>\n` +
@@ -226,8 +238,16 @@ async function checkDomain(domain: string, env: Env): Promise<void> {
       `- Worker: <code>dns-bot</code>\n` +
       `- Domain: <code>${domain}</code>`;
 
-    await sendTelegramMessage(env, errorMessage);
-    console.error(`Error monitoring DNS for ${domain}:`, error);
+    try {
+      await sendTelegramMessage(env, errorMessage);
+    } catch (telegramError: unknown) {
+      // Don't rethrow: a failed Telegram send would crash the run and skip
+      // the remaining domains
+      console.error(
+        `Failed to send error alert for ${domain}:`,
+        telegramError
+      );
+    }
   }
 }
 
