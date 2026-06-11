@@ -1,236 +1,105 @@
-const { execSync } = require("child_process");
+const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const readline = require("readline");
-require("dotenv").config();
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
+// CI-only deploy script: runs from the GitHub Actions deploy workflow with
+// all configuration passed via environment variables. It must never prompt —
+// anything missing fails the run loudly instead.
+//
+// TELEGRAM_BOT_TOKEN is the only worker secret. The rest are plain-text vars
+// (GitHub repo variables) passed to `wrangler deploy --var` so they're
+// visible in the Cloudflare dashboard for debugging.
 
-// Helper to run commands and handle errors
-function runCommand(command, errorMessage) {
-  try {
-    return execSync(command, { stdio: "inherit" });
-  } catch (error) {
-    console.error(`❌ ${errorMessage}`);
-    console.error(error.message);
-    process.exit(1);
-  }
+const REQUIRED_ENV = [
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CLOUDFLARE_API_TOKEN",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_CHAT_ID",
+  "MONITOR_DOMAINS",
+];
+
+// Plain-text vars; TELEGRAM_THREAD_ID and HEARTBEAT_URL are optional
+const TEXT_VARS = [
+  "MONITOR_DOMAINS",
+  "TELEGRAM_CHAT_ID",
+  "TELEGRAM_THREAD_ID",
+  "HEARTBEAT_URL",
+];
+
+function fail(message) {
+  console.error(`❌ ${message}`);
+  process.exit(1);
 }
 
-// Helper to prompt for input
-function prompt(question) {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      resolve(answer);
-    });
-  });
+function checkRequiredEnv() {
+  const missing = REQUIRED_ENV.filter((name) => !process.env[name]);
+  if (missing.length > 0) {
+    fail(`Missing required environment variables: ${missing.join(", ")}`);
+  }
+  console.log("✅ All required environment variables are set");
 }
 
-// Check if Wrangler is installed
-function checkWrangler() {
-  try {
-    execSync("npx wrangler --version", { stdio: "ignore" });
-    console.log("✅ Wrangler is installed");
-  } catch (error) {
-    console.error("❌ Installing Wrangler...");
-    runCommand(
-      "npm install --save-dev wrangler@4",
-      "Failed to install Wrangler"
-    );
-  }
-}
-
-// Check if logged in to Cloudflare
-function checkCloudflareLogin() {
-  if (process.env.CLOUDFLARE_API_TOKEN) {
-    console.log("✅ Using CLOUDFLARE_API_TOKEN from environment");
-    return;
-  }
-  try {
-    execSync("npx wrangler whoami", { stdio: "ignore" });
-    console.log("✅ Logged in to Cloudflare");
-  } catch (error) {
-    console.error("❌ Not logged in to Cloudflare. Please login...");
-    runCommand("npx wrangler login", "Failed to login to Cloudflare");
-  }
-}
-
-// Check KV namespace is configured in wrangler.toml
-async function setupKVNamespace() {
+function checkKVNamespace() {
   const wranglerPath = path.join(__dirname, "../wrangler.toml");
   const wranglerContent = fs.readFileSync(wranglerPath, "utf8");
-  const match = wranglerContent.match(/id\s*=\s*"([^"]*)"/);
-
-  if (match && match[1]) {
-    console.log("✅ KV namespace already configured in wrangler.toml");
-    return;
+  const match = wranglerContent.match(/id\s*=\s*"([^"]+)"/);
+  if (!match) {
+    fail("KV namespace id is not configured in wrangler.toml");
   }
+  console.log("✅ KV namespace configured in wrangler.toml");
+}
 
-  // Temporarily remove kv_namespaces so wrangler doesn't choke on the empty id
-  const stripped = wranglerContent.replace(
-    /# KV Namespace configuration\nkv_namespaces = \[.*\]\n/s,
-    ""
+function setupBotTokenSecret() {
+  console.log("🌀 Uploading TELEGRAM_BOT_TOKEN secret...");
+  const result = spawnSync(
+    "npx",
+    ["wrangler", "secret", "put", "TELEGRAM_BOT_TOKEN"],
+    {
+      input: process.env.TELEGRAM_BOT_TOKEN,
+      stdio: ["pipe", "inherit", "inherit"],
+    }
   );
-  fs.writeFileSync(wranglerPath, stripped);
+  if (result.status !== 0) {
+    fail("Failed to set TELEGRAM_BOT_TOKEN");
+  }
+}
 
-  console.log("Creating KV namespace...");
-  let output;
-  try {
-    output = execSync('npx wrangler kv namespace create "DNS_KV"', {
-      encoding: "utf8",
+function deleteLegacySecrets() {
+  // These used to be worker secrets and are now plain-text vars; a leftover
+  // secret with the same name conflicts with the var binding on deploy.
+  // Wrangler auto-confirms the delete prompt when running non-interactively,
+  // and a failed delete just means the secret is already gone.
+  for (const name of TEXT_VARS) {
+    const result = spawnSync("npx", ["wrangler", "secret", "delete", name], {
+      stdio: "pipe",
     });
-  } catch (error) {
-    // Restore original content on failure
-    fs.writeFileSync(wranglerPath, wranglerContent);
-    console.error("❌ Failed to create KV namespace");
-    process.exit(1);
-  }
-
-  const idMatch = output.match(/id = "([^"]+)"/);
-  if (!idMatch) {
-    fs.writeFileSync(wranglerPath, wranglerContent);
-    console.error("❌ Failed to parse KV namespace ID from output");
-    process.exit(1);
-  }
-
-  // Restore with the real ID
-  const newContent = wranglerContent.replace(
-    /id\s*=\s*"[^"]*"/,
-    `id = "${idMatch[1]}"`
-  );
-  fs.writeFileSync(wranglerPath, newContent);
-  console.log("✅ KV namespace created and added to wrangler.toml");
-}
-
-// Check and set up Telegram secrets
-async function setupTelegramSecrets() {
-  // TELEGRAM_BOT_TOKEN
-  let botToken = process.env.TELEGRAM_BOT_TOKEN;
-  if (botToken) {
-    console.log("ℹ️ Using TELEGRAM_BOT_TOKEN from environment");
-    runCommand(
-      `echo '${botToken}' | npx wrangler secret put TELEGRAM_BOT_TOKEN`,
-      "Failed to set Telegram bot token from environment"
-    );
-  } else {
-    try {
-      execSync("npx wrangler secret get TELEGRAM_BOT_TOKEN", {
-        stdio: "ignore",
-      });
-      console.log("✅ Telegram bot token is set");
-    } catch (error) {
-      const token = await prompt("Enter your Telegram bot token: ");
-      runCommand(
-        `echo '${token}' | npx wrangler secret put TELEGRAM_BOT_TOKEN`,
-        "Failed to set Telegram bot token"
-      );
-    }
-  }
-
-  // TELEGRAM_CHAT_ID
-  let chatId = process.env.TELEGRAM_CHAT_ID;
-  if (chatId) {
-    console.log("ℹ️ Using TELEGRAM_CHAT_ID from environment");
-    runCommand(
-      `echo '${chatId}' | npx wrangler secret put TELEGRAM_CHAT_ID`,
-      "Failed to set Telegram chat ID from environment"
-    );
-  } else {
-    try {
-      execSync("npx wrangler secret get TELEGRAM_CHAT_ID", { stdio: "ignore" });
-      console.log("✅ Telegram chat ID is set");
-    } catch (error) {
-      const chatIdPrompt = await prompt("Enter your Telegram chat ID: ");
-      runCommand(
-        `echo '${chatIdPrompt}' | npx wrangler secret put TELEGRAM_CHAT_ID`,
-        "Failed to set Telegram chat ID"
-      );
-    }
-  }
-
-  // TELEGRAM_THREAD_ID (optional — for posting to a specific topic in a group chat)
-  let threadId = process.env.TELEGRAM_THREAD_ID;
-  if (threadId) {
-    console.log("ℹ️ Using TELEGRAM_THREAD_ID from environment");
-    runCommand(
-      `echo '${threadId}' | npx wrangler secret put TELEGRAM_THREAD_ID`,
-      "Failed to set Telegram thread ID from environment"
-    );
-  } else {
-    console.log(
-      "ℹ️ TELEGRAM_THREAD_ID not set (optional — only needed for group chat topics)"
-    );
-  }
-}
-
-// Set up HEARTBEAT_URL from environment (optional — Uptime Kuma push monitor)
-async function setupHeartbeatUrl() {
-  const heartbeatUrl = process.env.HEARTBEAT_URL;
-  if (heartbeatUrl) {
-    console.log("ℹ️ Using HEARTBEAT_URL from environment");
-    runCommand(
-      `echo '${heartbeatUrl}' | npx wrangler secret put HEARTBEAT_URL`,
-      "Failed to set HEARTBEAT_URL from environment"
-    );
-  } else {
-    console.log(
-      "ℹ️ HEARTBEAT_URL not set (optional — only needed for Uptime Kuma push monitoring)"
-    );
-  }
-}
-
-// Set up MONITOR_DOMAINS from environment
-async function setupMonitorDomains() {
-  let domains = process.env.MONITOR_DOMAINS;
-  if (domains) {
-    console.log("ℹ️ Using MONITOR_DOMAINS from environment");
-    runCommand(
-      `echo '${domains}' | npx wrangler secret put MONITOR_DOMAINS`,
-      "Failed to set MONITOR_DOMAINS"
-    );
-  } else {
-    try {
-      execSync("npx wrangler secret get MONITOR_DOMAINS", { stdio: "ignore" });
-      console.log("✅ MONITOR_DOMAINS is set");
-    } catch (error) {
-      const domainsPrompt = await prompt(
-        "Enter domains to monitor (comma-separated): "
-      );
-      runCommand(
-        `echo '${domainsPrompt}' | npx wrangler secret put MONITOR_DOMAINS`,
-        "Failed to set MONITOR_DOMAINS"
-      );
+    if (result.status === 0) {
+      console.log(`✅ Deleted legacy secret ${name}`);
+    } else {
+      console.log(`ℹ️ No legacy secret ${name} to delete`);
     }
   }
 }
 
-// Main deployment process
-async function deploy() {
-  console.log("🚀 Starting deployment process...\n");
+function deploy() {
+  const args = ["wrangler", "deploy"];
+  for (const name of TEXT_VARS) {
+    const value = process.env[name];
+    if (value) {
+      args.push("--var", `${name}:${value}`);
+    }
+  }
 
-  // Check prerequisites
-  checkWrangler();
-  checkCloudflareLogin();
-
-  // Set up configuration
-  await setupKVNamespace();
-  await setupTelegramSecrets();
-  await setupHeartbeatUrl();
-  await setupMonitorDomains();
-
-  // Deploy
   console.log("\n📦 Deploying...");
-  runCommand("npx wrangler deploy", "Deployment failed");
-
+  const result = spawnSync("npx", args, { stdio: "inherit" });
+  if (result.status !== 0) {
+    fail("Deployment failed");
+  }
   console.log("\n✅ Deployment completed successfully!");
-  rl.close();
 }
 
-// Run deployment
-deploy().catch((error) => {
-  console.error("❌ Deployment failed:", error);
-  process.exit(1);
-});
+checkRequiredEnv();
+checkKVNamespace();
+setupBotTokenSecret();
+deleteLegacySecrets();
+deploy();

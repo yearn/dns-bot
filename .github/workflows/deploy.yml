@@ -22,28 +22,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check required secrets
+      - name: Check required secrets and variables
         run: |
+          if [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
+            echo "❌ CLOUDFLARE_ACCOUNT_ID secret is not set"
+            exit 1
+          fi
           if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
-            echo "❌ CLOUDFLARE_API_TOKEN is not set"
+            echo "❌ CLOUDFLARE_API_TOKEN secret is not set"
             exit 1
           fi
           if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then
-            echo "❌ TELEGRAM_BOT_TOKEN is not set"
+            echo "❌ TELEGRAM_BOT_TOKEN secret is not set"
             exit 1
           fi
-          if [ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
-            echo "❌ TELEGRAM_CHAT_ID is not set"
+          if [ -z "${{ vars.TELEGRAM_CHAT_ID }}" ]; then
+            echo "❌ TELEGRAM_CHAT_ID repository variable is not set"
             exit 1
           fi
-          echo "✅ All required secrets are set"
+          if [ -z "${{ vars.MONITOR_DOMAINS }}" ]; then
+            echo "❌ MONITOR_DOMAINS repository variable is not set"
+            exit 1
+          fi
+          echo "✅ All required secrets and variables are set"
 
       - name: Deploy to Cloudflare Workers
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}
-          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          TELEGRAM_THREAD_ID: ${{ vars.TELEGRAM_THREAD_ID }}
+          MONITOR_DOMAINS: ${{ vars.MONITOR_DOMAINS }}
+          HEARTBEAT_URL: ${{ vars.HEARTBEAT_URL }}
         run: npm run deploy

@@ -31,39 +31,15 @@ The project is designed to stay comfortably within Cloudflare's free tier for it
    npm install
    ```
 
-3. **Configure your bot and secrets:**
+3. **Configure your bot:**
 
-   - Create a `.env` file in the project root and supply values:
-
-     ```bash
-     cp .env.example .env
-     ```
-
-   - Supply the same variables and values as github actions secrets within your repository's settings.[^1]
+   All configuration lives in your repository's Settings > Secrets and variables > Actions.[^1]
 
    - Get your Cloudflare API token[^2]
 
 4. **Deploy the bot:**
 
-   - **Option 1: Deploy locally**
-
-     Run the deploy script:
-
-     ```bash
-     npm run deploy
-     ```
-
-     This will:
-
-     - Set up the KV namespace if needed
-     - Configure Telegram secrets
-     - Update the worker configuration
-     - Deploy to Cloudflare Workers
-
-   - **Option 2: Deploy via GitHub Actions**
-
-     - Push your changes to the `main` branch.
-     - The GitHub Action will automatically deploy the bot.
+   Deploys only run via GitHub Actions — push to the `main`/`master` branch (or trigger the workflow manually) and the GitHub Action will deploy the bot.
 
 ## Viewing Logs
 
@@ -83,7 +59,7 @@ To view the logs for your deployed worker:
 
 ## Footnotes
 
-[^1]: Required secrets must be set in both your local `.env` file and GitHub Actions repository secrets. Go to your repository's Settings > Secrets and variables > Actions and add: `CLOUDFLARE_API_TOKEN`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID`. Optionally add `TELEGRAM_THREAD_ID` to post alerts to a specific topic thread in a Telegram group chat.
+[^1]: Go to your repository's Settings > Secrets and variables > Actions. Add the sensitive values as **secrets**: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `TELEGRAM_BOT_TOKEN`. Add the rest as **variables**: `MONITOR_DOMAINS` (comma-separated domains) and `TELEGRAM_CHAT_ID`, plus optionally `TELEGRAM_THREAD_ID` to post alerts to a specific topic thread in a Telegram group chat and `HEARTBEAT_URL` for Uptime Kuma push monitoring.
 [^2]: To get your Cloudflare API token:
 
     1. Go to the [Cloudflare Dashboard](https://dash.cloudflare.com/)
