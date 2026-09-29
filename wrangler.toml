@@ -7,6 +7,17 @@ kv_namespaces = [
   { binding = "DNS_KV", id = "fd1d19aa9e2c4cabb5197368d245314b" }
 ]
 
+# Non-secret configuration. These used to be GitHub repository variables passed
+# with `wrangler deploy --var` by scripts/deploy.js; the shared yearn-gha deploy
+# workflow runs a plain `wrangler deploy`, so they live here instead. Only values
+# that are safe in a public repository belong in this block — the Telegram
+# routing IDs and the Uptime Kuma push URL are worker secrets in Doppler.
+[vars]
+MONITOR_DOMAINS = "yearn.fi,yearn.finance,yearn.dev,resupply.fi,bearn.sucks,flexmeow.com"
+# IP changes that stay inside a domain's ranges update state silently instead of
+# alerting — Vercel and similar hosts rotate IPs within known pools.
+ALLOWED_IP_RANGES = "flexmeow.com=216.150.0.0/16"
+
 [observability]
 [observability.logs]
 enabled = true

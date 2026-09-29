@@ -12,34 +12,62 @@ The project is designed to stay comfortably within Cloudflare's free tier for it
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) (v20 or later)
-- [npm](https://www.npmjs.com/) (comes with Node.js)
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) (v4 or later)
+- [Bun](https://bun.sh/) (this repository uses bun; the deploy workflow pins `1.3.14`)
+- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) (v4 or later) — installed as a dev dependency
 
-## Setup
+## Configuration
 
-1. **Clone the repository:**
+Non-secret configuration lives in `wrangler.toml` under `[vars]`:
 
-   ```bash
-   git clone https://github.com/wavey0x/dns-bot.git
-   cd dns-bot
-   ```
+- `MONITOR_DOMAINS` — comma-separated domains to watch
+- `ALLOWED_IP_RANGES` — e.g. `flexmeow.com=216.150.0.0/16;other.com=76.76.21.0/24`.
+  IP changes that stay inside a domain's expected CIDR ranges update state
+  silently instead of alerting, which is useful for hosts like Vercel that
+  rotate IPs within known pools.
 
-2. **Install dependencies:**
+Worker secrets live in Doppler project `dns-bot`, config `prd`, each set to
+**Masked**:
 
-   ```bash
-   npm install
-   ```
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- `TELEGRAM_THREAD_ID` (optional) — posts alerts to a specific topic thread
+- `HEARTBEAT_URL` (optional) — Uptime Kuma push URL. This embeds a push token,
+  which is why it is a secret and not a `[vars]` entry in this public repo.
 
-3. **Configure your bot:**
+## Deploying (yearn)
 
-   All configuration lives in your repository's Settings > Secrets and variables > Actions.[^1]
+A push to `master` deploys through the shared `yearn/yearn-gha` Cloudflare
+workflow, which authenticates to Doppler with OIDC. It is the only deploy path
+— there is no manual trigger and no Cloudflare token in GitHub. The shared
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` come from Doppler
+`webops-shared-prod` / `cloudflare-deploy-configs`.
 
-   - Get your Cloudflare API token[^2]
+Each deploy pushes every value in `dns-bot` / `prd` to the worker with
+`wrangler secret bulk` before `wrangler deploy`, so Doppler is the single source
+of truth. Two caveats: the sync is additive (a key removed from Doppler stays on
+the worker until `wrangler secret delete`), and a manual `wrangler secret put` is
+reverted on the next deploy.
 
-4. **Deploy the bot:**
+Repository variable `DOPPLER_PRODUCTION_IDENTITY_ID` holds the production Doppler
+identity; identity IDs are not secrets. See
+`yearn-gha/specs/doppler-cloudflare.md` for the identity's required claims.
 
-   Deploys only run via GitHub Actions — push to the `main`/`master` branch (or trigger the workflow manually) and the GitHub Action will deploy the bot.
+## Running your own copy
+
+The Doppler path above is yearn-specific. To run this bot in your own Cloudflare
+account, deploy from your machine instead:
+
+```bash
+bun install
+bun run wrangler secret put TELEGRAM_BOT_TOKEN
+bun run wrangler secret put TELEGRAM_CHAT_ID
+# optional: TELEGRAM_THREAD_ID, HEARTBEAT_URL
+CLOUDFLARE_API_TOKEN=... bun run deploy
+```
+
+Edit `[vars]` in `wrangler.toml` for your own domains, and create your own KV
+namespace (`bun run wrangler kv namespace create DNS_KV`), updating the `id` in
+`wrangler.toml`. You will need a Cloudflare API token[^2].
 
 ## Viewing Logs
 
@@ -52,14 +80,13 @@ To view the logs for your deployed worker:
 
 ## Troubleshooting
 
-- **Wrangler not found:** Ensure Wrangler is installed globally or use `npx wrangler`.
-- **Deployment fails:** Check your API token and ensure all environment variables are set correctly.
+- **Wrangler not found:** Run `bun install`, then use `bun run wrangler`.
+- **Deployment fails:** Check the API token and that `dns-bot` / `prd` in Doppler is populated — the deploy fails loudly if it resolves empty.
 - **No logs:** Ensure logging is enabled in your `wrangler.toml` file.
-- **GitHub Actions fails:** Verify that all required secrets are set in your repository's Settings > Secrets and variables > Actions.
+- **GitHub Actions fails:** Verify the repository variable `DOPPLER_PRODUCTION_IDENTITY_ID` is set and that the Doppler identity's claims match the pinned workflow SHA.
 
 ## Footnotes
 
-[^1]: Go to your repository's Settings > Secrets and variables > Actions. Add the sensitive values as **secrets**: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `TELEGRAM_BOT_TOKEN`. Add the rest as **variables**: `MONITOR_DOMAINS` (comma-separated domains) and `TELEGRAM_CHAT_ID`, plus optionally `TELEGRAM_THREAD_ID` to post alerts to a specific topic thread in a Telegram group chat and `HEARTBEAT_URL` for Uptime Kuma push monitoring. Optionally add `ALLOWED_IP_RANGES` (e.g. `flexmeow.com=216.150.0.0/16;other.com=76.76.21.0/24,76.76.22.0/24`) so IP changes that stay inside a domain's expected CIDR ranges update state silently instead of alerting - useful for hosts like Vercel that rotate IPs within known pools.
 [^2]: To get your Cloudflare API token:
 
     1. Go to the [Cloudflare Dashboard](https://dash.cloudflare.com/)

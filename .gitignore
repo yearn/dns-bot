@@ -24,3 +24,7 @@ build/
 # OS
 .DS_Store
 Thumbs.db 
+# lock files (using bun)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
