@@ -17,22 +17,19 @@ The project is designed to stay comfortably within Cloudflare's free tier for it
 
 ## Configuration
 
-Non-secret configuration lives in `wrangler.toml` under `[vars]`:
+All configuration lives in Doppler project `dns-bot`, config `prd`, each set to
+**Masked**, and is pushed to the worker on every deploy:
 
 - `MONITOR_DOMAINS` — comma-separated domains to watch
 - `ALLOWED_IP_RANGES` — e.g. `flexmeow.com=216.150.0.0/16;other.com=76.76.21.0/24`.
   IP changes that stay inside a domain's expected CIDR ranges update state
   silently instead of alerting, which is useful for hosts like Vercel that
   rotate IPs within known pools.
-
-Worker secrets live in Doppler project `dns-bot`, config `prd`, each set to
-**Masked**:
-
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 - `TELEGRAM_THREAD_ID` (optional) — posts alerts to a specific topic thread
 - `HEARTBEAT_URL` (optional) — Uptime Kuma push URL. This embeds a push token,
-  which is why it is a secret and not a `[vars]` entry in this public repo.
+  so it must stay out of this public repo.
 
 ## Deploying (yearn)
 
@@ -65,7 +62,8 @@ bun run wrangler secret put TELEGRAM_CHAT_ID
 CLOUDFLARE_API_TOKEN=... bun run deploy
 ```
 
-Edit `[vars]` in `wrangler.toml` for your own domains, and create your own KV
+Set `MONITOR_DOMAINS` (and optionally `ALLOWED_IP_RANGES`) with
+`bun run wrangler secret put` for your own domains, and create your own KV
 namespace (`bun run wrangler kv namespace create DNS_KV`), updating the `id` in
 `wrangler.toml`. You will need a Cloudflare API token[^2].
 
