@@ -4,10 +4,9 @@
   "description": "DNS monitoring bot using Cloudflare Workers",
   "main": "src/index.ts",
   "scripts": {
-    "build": "node scripts/build.js",
-    "deploy": "node scripts/deploy.js",
-    "dev": "npx wrangler dev",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "dns",
@@ -17,10 +16,6 @@
   ],
   "author": "",
   "license": "MIT",
-  "dependencies": {
-    "dotenv": "16.5.0",
-    "node-telegram-bot-api": "0.64.0"
-  },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20250514.0",
     "typescript": "5.8.3",
