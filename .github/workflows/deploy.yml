@@ -12,7 +12,7 @@ cache-mode: none
 
 jobs:
   deploy:
-    uses: yearn/yearn-gha/.github/workflows/cloudflare-deploy.yml@22362daf9934a759c1c9c258388111271e649faa
+    uses: yearn/yearn-gha/.github/workflows/cloudflare-deploy.yml@e6b4d914d9256b6becdf7c30605238894fa54638
     with:
       project: dns-bot
       identity-id: ${{ vars.DOPPLER_PRODUCTION_IDENTITY_ID }}
